@@ -10,6 +10,8 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: lanesight
+    description: Live San Francisco bicycle route and street data
 paths:
   /healthz:
     get:
@@ -24,6 +26,96 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /lanesight/bikeways:
+    get:
+      operationId: getBikeNetwork
+      tags: [lanesight]
+      summary: Get the official San Francisco bikeway network
+      responses:
+        "200":
+          description: City bikeway segments
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BikeNetworkResponse"
+        "502":
+          description: City bikeway data could not be loaded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /lanesight/stations:
+    get:
+      operationId: getBikeStations
+      tags: [lanesight]
+      summary: Get current Bay Wheels station availability in San Francisco
+      responses:
+        "200":
+          description: Live station availability
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BikeStationsResponse"
+        "502":
+          description: Bay Wheels status could not be loaded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /lanesight/conditions:
+    get:
+      operationId: getStreetConditions
+      tags: [lanesight]
+      summary: Get current permitted street restrictions and recent open 311 reports
+      responses:
+        "200":
+          description: Recent official reports and permitted restrictions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StreetConditionsResponse"
+        "502":
+          description: Street condition data could not be loaded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /lanesight/route:
+    post:
+      operationId: planBikeRoute
+      tags: [lanesight]
+      summary: Geocode San Francisco places and calculate a low-traffic bike route
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BikeRouteRequest"
+      responses:
+        "200":
+          description: A bicycle route on the mapped street network
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BikeRouteResponse"
+        "400":
+          description: Invalid route request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: A place could not be found within San Francisco
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "502":
+          description: Geocoding or bicycle routing service is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
 components:
   schemas:
     HealthStatus:
@@ -33,4 +125,257 @@ components:
           type: string
       required:
         - status
+    ApiError:
+      type: object
+      properties:
+        error:
+          type: string
+      required: [error]
+    Coordinate:
+      type: array
+      minItems: 2
+      maxItems: 2
+      items:
+        type: number
+    LineString:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [LineString]
+        coordinates:
+          type: array
+          items:
+            $ref: "#/components/schemas/Coordinate"
+      required: [type, coordinates]
+    BikeLaneSegment:
+      type: object
+      properties:
+        id:
+          type: string
+        streetName:
+          type: string
+        facilityType:
+          type: string
+        symbology:
+          type: string
+        fromStreet:
+          type: ["string", "null"]
+        toStreet:
+          type: ["string", "null"]
+        sharrow:
+          type: boolean
+        buffered:
+          type: boolean
+        raised:
+          type: boolean
+        contraflow:
+          type: boolean
+        dataAsOf:
+          type: ["string", "null"]
+        geometry:
+          $ref: "#/components/schemas/LineString"
+      required:
+        - id
+        - streetName
+        - facilityType
+        - symbology
+        - sharrow
+        - buffered
+        - raised
+        - contraflow
+        - geometry
+    BikeNetworkResponse:
+      type: object
+      properties:
+        sourceUpdatedAt:
+          type: string
+        total:
+          type: integer
+        segments:
+          type: array
+          items:
+            $ref: "#/components/schemas/BikeLaneSegment"
+      required: [sourceUpdatedAt, total, segments]
+    BikeStation:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        shortName:
+          type: ["string", "null"]
+        latitude:
+          type: number
+        longitude:
+          type: number
+        bikesAvailable:
+          type: integer
+        ebikesAvailable:
+          type: integer
+        docksAvailable:
+          type: integer
+        capacity:
+          type: ["integer", "null"]
+        isRenting:
+          type: boolean
+        isReturning:
+          type: boolean
+        lastReported:
+          type: string
+      required:
+        - id
+        - name
+        - latitude
+        - longitude
+        - bikesAvailable
+        - ebikesAvailable
+        - docksAvailable
+        - isRenting
+        - isReturning
+        - lastReported
+    BikeStationsResponse:
+      type: object
+      properties:
+        fetchedAt:
+          type: string
+        updatedAt:
+          type: string
+        ttlSeconds:
+          type: integer
+        stations:
+          type: array
+          items:
+            $ref: "#/components/schemas/BikeStation"
+      required: [fetchedAt, updatedAt, ttlSeconds, stations]
+    StreetClosure:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+        status:
+          type: string
+        startAt:
+          type: string
+        endAt:
+          type: string
+        street:
+          type: string
+        fromStreet:
+          type: ["string", "null"]
+        toStreet:
+          type: ["string", "null"]
+        locationDescription:
+          type: string
+        laneImpact:
+          type: string
+        geometry:
+          $ref: "#/components/schemas/LineString"
+      required:
+        - id
+        - name
+        - type
+        - status
+        - startAt
+        - endAt
+        - street
+        - locationDescription
+        - laneImpact
+        - geometry
+    StreetReport:
+      type: object
+      properties:
+        id:
+          type: string
+        category:
+          type: string
+        detail:
+          type: string
+        address:
+          type: string
+        status:
+          type: string
+        reportedAt:
+          type: string
+        latitude:
+          type: number
+        longitude:
+          type: number
+      required:
+        - id
+        - category
+        - detail
+        - address
+        - status
+        - reportedAt
+        - latitude
+        - longitude
+    StreetConditionsResponse:
+      type: object
+      properties:
+        fetchedAt:
+          type: string
+        closures:
+          type: array
+          items:
+            $ref: "#/components/schemas/StreetClosure"
+        reports:
+          type: array
+          items:
+            $ref: "#/components/schemas/StreetReport"
+      required: [fetchedAt, closures, reports]
+    BikeRouteRequest:
+      type: object
+      properties:
+        origin:
+          type: string
+          minLength: 2
+          maxLength: 160
+        destination:
+          type: string
+          minLength: 2
+          maxLength: 160
+      required: [origin, destination]
+    RouteEndpoint:
+      type: object
+      properties:
+        label:
+          type: string
+        latitude:
+          type: number
+        longitude:
+          type: number
+      required: [label, latitude, longitude]
+    BikeRouteResponse:
+      type: object
+      properties:
+        origin:
+          $ref: "#/components/schemas/RouteEndpoint"
+        destination:
+          $ref: "#/components/schemas/RouteEndpoint"
+        distanceMeters:
+          type: number
+        durationSeconds:
+          type: number
+        profile:
+          type: string
+        source:
+          type: string
+        coordinates:
+          type: array
+          items:
+            $ref: "#/components/schemas/Coordinate"
+      required:
+        - origin
+        - destination
+        - distanceMeters
+        - durationSeconds
+        - profile
+        - source
+        - coordinates
 
