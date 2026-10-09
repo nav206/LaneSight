@@ -1,6 +1,6 @@
-# [Project name]
+# LaneSight
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+A single-page bicycle route planner demo showing route safety, bike-lane details, road hazards, and sample bike-share docks.
 
 ## Run & Operate
 
@@ -22,19 +22,23 @@ _Replace the heading above with the project's name, and this line with one sente
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `artifacts/lanesight/` — responsive LaneSight web app; route and dock data are local demo data.
+- `artifacts/api-server/` — shared API scaffold; not required by the current LaneSight experience.
+- `artifacts/mockup-sandbox/` — reusable design preview sandbox.
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- LaneSight is frontend-only for now; the first-use San Francisco route works without an account, external routing provider, or database.
+- Search supports the included demo destinations only; mock navigation must remain clearly labeled as a demo.
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+LaneSight previews bicycle routes with safety-colored segments, tappable lane and hazard details, and mock bike-share dock counts. The Ferry Building sample route is preloaded so the app is usable on first visit.
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+- Keep the app simple and responsive on phones and laptops.
+- Do not add accounts or payments for now.
 
 ## Gotchas
 

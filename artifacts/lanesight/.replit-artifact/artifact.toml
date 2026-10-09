@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "LaneSight"
+description = "A responsive single-page bicycle route planner that highlights safer route segments, street hazards, bike-lane details, and dock availability, with an interactive San Francisco sample route ready on first visit."
+version = "1.0.0"
+id = "artifacts/lanesight"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 24724
+
+[services.development]
+run = "pnpm --filter @workspace/lanesight run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/lanesight", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/lanesight/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "24724"
+BASE_PATH = "/"
