@@ -84,7 +84,7 @@ paths:
     post:
       operationId: planBikeRoute
       tags: [lanesight]
-      summary: Geocode San Francisco places and calculate a low-traffic bike route
+      summary: Route on official SFMTA bikeways with OSM street connectors
       requestBody:
         required: true
         content:
@@ -93,7 +93,7 @@ paths:
               $ref: "#/components/schemas/BikeRouteRequest"
       responses:
         "200":
-          description: A bicycle route on the mapped street network
+          description: A directional route on mapped SFMTA bikeways with separately mapped street connectors
           content:
             application/json:
               schema:
@@ -105,7 +105,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
         "404":
-          description: A place could not be found within San Francisco
+          description: A place could not be found or no continuous mapped bikeway route connects the places
           content:
             application/json:
               schema:
@@ -171,6 +171,12 @@ components:
           type: boolean
         contraflow:
           type: boolean
+        direction:
+          type: ["string", "null"]
+          description: Compass direction of travel for this SFMTA feature.
+        direct:
+          type: ["string", "null"]
+          description: Whether the mapped facility is one-way or two-way.
         dataAsOf:
           type: ["string", "null"]
         geometry:
@@ -184,6 +190,8 @@ components:
         - buffered
         - raised
         - contraflow
+        - direction
+        - direct
         - geometry
     BikeNetworkResponse:
       type: object
@@ -366,6 +374,22 @@ components:
           type: string
         source:
           type: string
+        laneDistanceMeters:
+          type: number
+        connectorDistanceMeters:
+          type: number
+        networkUpdatedAt:
+          type: string
+        laneCoordinates:
+          type: array
+          items:
+            $ref: "#/components/schemas/Coordinate"
+        connectorCoordinates:
+          type: array
+          items:
+            type: array
+            items:
+              $ref: "#/components/schemas/Coordinate"
         coordinates:
           type: array
           items:
@@ -377,5 +401,10 @@ components:
         - durationSeconds
         - profile
         - source
+        - laneDistanceMeters
+        - connectorDistanceMeters
+        - networkUpdatedAt
+        - laneCoordinates
+        - connectorCoordinates
         - coordinates
 

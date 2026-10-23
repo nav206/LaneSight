@@ -374,7 +374,7 @@ export const getPlanBikeRouteUrl = () => {
 }
 
 /**
- * @summary Geocode San Francisco places and calculate a low-traffic bike route
+ * @summary Route on official SFMTA bikeways with OSM street connectors
  */
 export const planBikeRoute = async (bikeRouteRequest: BikeRouteRequest, options?: Parameters<typeof customFetch>[1]): Promise<BikeRouteResponse> => {
 
@@ -440,7 +440,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type PlanBikeRouteMutationVariables = {data: BodyType<BikeRouteRequest>}
 
     /**
- * @summary Geocode San Francisco places and calculate a low-traffic bike route
+ * @summary Route on official SFMTA bikeways with OSM street connectors
  */
 export const usePlanBikeRoute = <TError = ErrorType<ApiError>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof planBikeRoute>>, TError,PlanBikeRouteMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}

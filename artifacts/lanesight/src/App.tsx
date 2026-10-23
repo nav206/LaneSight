@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { CircleMarker, GeoJSON, MapContainer, Polyline, Popup, TileLayer, useMap } from 'react-leaflet';
 import type { BikeLaneSegment, BikeRouteResponse, StreetClosure, StreetReport } from '@workspace/api-client-react';
 import { getGetBikeStationsQueryKey, getGetStreetConditionsQueryKey, useGetBikeNetwork, useGetBikeStations, useGetStreetConditions, usePlanBikeRoute } from '@workspace/api-client-react';
@@ -8,25 +8,27 @@ import type { LatLngBoundsExpression, LatLngExpression, PathOptions } from 'leaf
 const DEFAULT_ORIGIN = 'Civic Center, San Francisco';
 const DEFAULT_DESTINATION = 'Ferry Building, San Francisco';
 const SF_CENTER: LatLngExpression = [37.767, -122.433];
+const SF_BOUNDS: LatLngBoundsExpression = [[37.707, -122.516], [37.833, -122.355]];
 
 function coordinatePairs(coords: number[][]): LatLngExpression[] {
   return coords.filter((point) => point.length >= 2).map(([lng, lat]) => [lat, lng] as LatLngExpression);
 }
 
-function routeCoordinates(route: BikeRouteResponse): LatLngExpression[] {
-  return coordinatePairs(route.coordinates as number[][]);
+function routeLaneCoordinates(route: BikeRouteResponse): LatLngExpression[] {
+  return coordinatePairs(route.laneCoordinates as number[][]);
 }
 
-function ZoomToRoute({ route }: { route?: BikeRouteResponse }) {
+function routeConnectorCoordinates(route: BikeRouteResponse): LatLngExpression[][] {
+  return route.connectorCoordinates
+    .map((coordinates) => coordinatePairs(coordinates as number[][]))
+    .filter((coordinates) => coordinates.length > 1);
+}
+
+function FitCitywide() {
   const map = useMap();
   useEffect(() => {
-    if (!route?.coordinates?.length) {
-      map.setView(SF_CENTER, 13);
-      return;
-    }
-    const points = routeCoordinates(route);
-    if (points.length) map.fitBounds(points as LatLngBoundsExpression, { padding: [48, 48], maxZoom: 15, animate: true });
-  }, [map, route]);
+    map.fitBounds(SF_BOUNDS, { padding: [24, 24], maxZoom: 11.5, animate: false });
+  }, [map]);
   return null;
 }
 
@@ -38,21 +40,66 @@ function MapZoomButtons() {
   </div>;
 }
 
+function facilityLabel(segment: BikeLaneSegment): string {
+  const type = segment.facilityType.trim().toUpperCase();
+  if (type.includes('CLASS I')) return 'Class I · shared-use path';
+  if (type.includes('CLASS II')) return 'Class II · bike lane';
+  if (type.includes('CLASS III')) return 'Class III · shared roadway';
+  if (type.includes('CLASS IV')) return 'Class IV · separated bikeway';
+  return [segment.facilityType, segment.symbology].filter(Boolean).join(' · ') || 'Unclassified SFMTA feature';
+}
+
 function facilityStyle(segment: BikeLaneSegment): PathOptions {
-  const kind = `${segment.facilityType} ${segment.symbology}`.toLowerCase();
-  const color = segment.raised || /protected|cycle track|separated/.test(kind) ? '#187b60'
-    : segment.buffered || /buffer/.test(kind) ? '#34a382'
-      : segment.sharrow || /sharrow|shared/.test(kind) ? '#d49b38' : '#567889';
-  return { color, weight: segment.raised ? 6 : 4, opacity: 0.86, lineCap: 'round', lineJoin: 'round' };
+  const type = segment.facilityType.trim().toUpperCase();
+  const base = { opacity: 0.9, lineCap: 'round' as const, lineJoin: 'round' as const };
+  if (type.includes('CLASS IV')) {
+    return { ...base, color: '#176d50', weight: segment.raised ? 6 : 5 };
+  }
+  if (type.includes('CLASS I')) {
+    return { ...base, color: '#78a887', weight: 4 };
+  }
+  if (type.includes('CLASS II')) {
+    return { ...base, color: segment.buffered ? '#318b78' : '#4b8da0', weight: segment.buffered ? 5 : 4 };
+  }
+  if (type.includes('CLASS III')) {
+    return { ...base, color: '#d19a3c', weight: 3, dashArray: segment.sharrow ? '3 4' : '6 5' };
+  }
+  return { ...base, color: '#667f87', weight: 3 };
 }
 
 function segmentDescription(segment: BikeLaneSegment): string {
-  return [segment.facilityType, segment.raised && 'raised', segment.buffered && 'buffered', segment.sharrow && 'shared-lane marking', segment.contraflow && 'contraflow'].filter(Boolean).join(' · ');
+  return [facilityLabel(segment), segment.raised && 'raised', segment.buffered && 'buffered', segment.sharrow && 'shared-lane marking', segment.contraflow && 'contraflow'].filter(Boolean).join(' · ');
+}
+
+function networkPopupContent(segment: BikeLaneSegment): HTMLElement {
+  const content = document.createElement('div');
+  const title = document.createElement('strong');
+  title.textContent = segment.streetName;
+  content.appendChild(title);
+  const details = document.createElement('div');
+  details.textContent = segmentDescription(segment);
+  content.appendChild(details);
+  if (segment.fromStreet && segment.toStreet) {
+    const limits = document.createElement('div');
+    limits.textContent = `${segment.fromStreet} to ${segment.toStreet}`;
+    content.appendChild(limits);
+  }
+  if (segment.dataAsOf) {
+    const updated = document.createElement('div');
+    updated.textContent = `SFMTA inventory · ${formatDate(segment.dataAsOf)}`;
+    content.appendChild(updated);
+  }
+  return content;
 }
 
 function errorMessage(error: unknown): string {
+  if (error && typeof error === 'object') {
+    const payload = 'data' in error ? (error as { data?: unknown }).data : error;
+    if (payload && typeof payload === 'object' && 'error' in payload) {
+      return String((payload as { error: unknown }).error);
+    }
+  }
   if (error instanceof Error) return error.message;
-  if (error && typeof error === 'object' && 'error' in error) return String((error as { error: unknown }).error);
   return 'The request could not be completed. Please try again.';
 }
 
@@ -92,7 +139,7 @@ function ReportMarker({ report }: { report: StreetReport }) {
 function App() {
   const [origin, setOrigin] = useState(DEFAULT_ORIGIN);
   const [destination, setDestination] = useState(DEFAULT_DESTINATION);
-  const [layers, setLayers] = useState({ network: true, stations: true, closures: true, reports: false });
+  const [layers, setLayers] = useState({ network: true, stations: true, closures: true, reports: true });
   const [submittedInputs, setSubmittedInputs] = useState({ origin: DEFAULT_ORIGIN, destination: DEFAULT_DESTINATION });
   const initialRequestStarted = useRef(false);
   const networkQuery = useGetBikeNetwork();
@@ -113,20 +160,35 @@ function App() {
   const stations = stationsQuery.data?.stations ?? [];
   const closures = conditionsQuery.data?.closures ?? [];
   const reports = conditionsQuery.data?.reports ?? [];
+  const totalBikesAvailable = stations.reduce((total, station) => total + station.bikesAvailable, 0);
+  const totalEbikesAvailable = stations.reduce((total, station) => total + station.ebikesAvailable, 0);
   const facilityKinds = useMemo(() => {
-    const kinds = new Map<string, number>();
+    const kinds = new Map<string, { count: number; color: string }>();
     segments.forEach((segment) => {
-      const label = segment.sharrow ? 'Shared-lane markings' : segment.raised || /protected|cycle track|separated/i.test(`${segment.facilityType} ${segment.symbology}`)
-        ? 'Protected / raised' : segment.buffered || /buffer/i.test(`${segment.facilityType} ${segment.symbology}`) ? 'Buffered' : segment.facilityType || segment.symbology || 'Other facilities';
-      kinds.set(label, (kinds.get(label) ?? 0) + 1);
+      const label = facilityLabel(segment);
+      const current = kinds.get(label);
+      kinds.set(label, {
+        count: (current?.count ?? 0) + 1,
+        color: current?.color ?? String(facilityStyle(segment).color),
+      });
     });
     return [...kinds.entries()];
   }, [segments]);
+  const networkGeoJson = useMemo(() => ({
+    type: 'FeatureCollection' as const,
+    features: segments.map((segment) => ({
+      type: 'Feature' as const,
+      id: segment.id,
+      properties: { segment },
+      geometry: segment.geometry,
+    })),
+  }), [segments]);
 
   const submitRoute = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!origin.trim() || !destination.trim()) return;
     setSubmittedInputs({ origin: origin.trim(), destination: destination.trim() });
+    routeMutation.reset();
     routeMutation.mutate({ data: { origin: origin.trim(), destination: destination.trim() } });
   };
 
@@ -169,7 +231,7 @@ function App() {
         </div>
         <div className="ls-mobile-search-area">{searchForm(true)}</div>
         <section className="ls-trip-card" data-testid="route-summary">
-          <div className="ls-trip-top"><strong>Planned route</strong><span className={`ls-pill ${routeMutation.isPending || (!route && routeMutation.isIdle) ? 'pending' : ''}`} data-testid="status-route-state">{routeMutation.isPending || (!route && routeMutation.isIdle) ? 'Calculating' : route ? 'OSM bike route' : 'No route'}</span></div>
+          <div className="ls-trip-top"><strong>Planned route</strong><span className={`ls-pill ${routeMutation.isPending || (!route && routeMutation.isIdle) ? 'pending' : ''}`} data-testid="status-route-state">{routeMutation.isPending || (!route && routeMutation.isIdle) ? 'Calculating' : route ? 'SFMTA bikeway route' : 'No route'}</span></div>
           <div className="ls-places">
             <div className="ls-place-dots"><i /><i /></div>
             <div className="ls-place-lines">
@@ -181,7 +243,7 @@ function App() {
             <div className="ls-stat"><Navigation size={14} color="#438069" /><div><strong data-testid="text-route-distance">{formatDistance(route.distanceMeters)}</strong><span>street distance</span></div></div>
             <div className="ls-stat"><Clock3 size={14} color="#438069" /><div><strong data-testid="text-route-duration">{formatDuration(route.durationSeconds)}</strong><span>ride estimate</span></div></div>
           </div> : <p className="ls-stat-note" data-testid="text-route-empty">{routeMutation.isPending ? 'Route details will appear when routing completes.' : 'Enter two San Francisco places to plan a route.'}</p>}
-          {route && <p className="ls-stat-note" data-testid="text-route-source">Low-traffic OSM bicycle route · {route.profile} · {route.source}</p>}
+          {route && <p className="ls-stat-note" data-testid="text-route-source">{formatDistance(route.laneDistanceMeters)} on the official SFMTA bikeway network · {formatDistance(route.connectorDistanceMeters)} low-traffic street connectors · network data updated {formatDate(route.networkUpdatedAt)}</p>}
         </section>
 
         <section aria-label="Bicycle infrastructure" data-testid="section-network">
@@ -192,23 +254,23 @@ function App() {
           {networkQuery.isLoading && <div className="ls-loading-line" data-testid="loading-network" />}
           {networkQuery.isError && <p className="ls-search-error" role="status" data-testid="status-network-error">Bikeway inventory unavailable. Map still shows available layers.</p>}
           {networkQuery.data && <><div className="ls-legend-list" data-testid="list-facility-types">
-            {facilityKinds.slice(0, 5).map(([label, count]) => <div className="ls-legend-row" key={label} data-testid={`facility-type-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}><i className={`ls-line-swatch ${/shared/i.test(label) ? 'sharrow' : /buffer/i.test(label) ? 'buffered' : /protected|raised/i.test(label) ? 'protected' : 'other'}`} /><span>{label} <small>· {count}</small></span></div>)}
+            {facilityKinds.slice(0, 5).map(([label, details]) => <div className="ls-legend-row" key={label} data-testid={`facility-type-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}><i className="ls-line-swatch" style={{ backgroundColor: details.color }} /><span>{label} <small>· {details.count}</small></span></div>)}
           </div><div className="ls-source-updated" data-testid="text-network-freshness">SFMTA data updated {formatDate(networkQuery.data.sourceUpdatedAt)}</div></>}
         </section>
 
         <section className="ls-data-section" aria-label="Bay Wheels stations" data-testid="section-stations">
-          <div className="ls-section-label"><strong>Bay Wheels</strong><span data-testid="text-stations-freshness">{stationsQuery.isLoading ? 'Loading live feed' : stationAge === null ? 'Live availability' : stationAge < 2 ? 'Updated just now' : `Updated ${stationAge}m ago`}</span></div>
+          <div className="ls-section-label"><strong>Bay Wheels live counts</strong><span data-testid="text-station-total">{stationsQuery.isLoading ? 'Loading live feed' : stationsQuery.data ? `${stations.length} stations · ${totalBikesAvailable} bikes (${totalEbikesAvailable} e-bikes)` : 'Live availability'}</span></div>
           {stationsQuery.isLoading && <div className="ls-data-list" data-testid="loading-stations"><div className="ls-loading-line" /><div className="ls-loading-line" /></div>}
           {stationsQuery.isError && <p className="ls-search-error" role="status" data-testid="status-stations-error">Station feed unavailable. Other map data remains available.</p>}
           {stationsQuery.data && <div className="ls-data-list" data-testid="list-stations">
             {stations.slice(0, 5).map((station) => <div className="ls-data-row" key={station.id} data-testid={`row-station-${station.id}`}><span className="ls-data-icon"><Bike size={14} /></span><span className="ls-data-name" title={station.name}>{station.shortName || station.name}</span><span className="ls-data-count">{station.isRenting ? `${station.bikesAvailable} bikes` : 'Not renting'}</span></div>)}
             {stations.length === 0 && <p className="ls-empty" data-testid="empty-stations">No Bay Wheels stations were returned.</p>}
           </div>}
-          {stationsQuery.data && <p className="ls-caption" data-testid="text-station-refresh">Feed fetched {formatDate(stationsQuery.data.fetchedAt)} · refreshes every {Math.round(stationsQuery.data.ttlSeconds / 60)} min</p>}
+          {stationsQuery.data && <p className="ls-caption" data-testid="text-station-refresh">{stationAge === null ? 'Feed update time unavailable' : stationAge < 2 ? 'Feed updated just now' : `Feed updated ${stationAge}m ago`} · refreshes every {Math.round(stationsQuery.data.ttlSeconds / 60)} min · fetched {formatDate(stationsQuery.data.fetchedAt)}</p>}
         </section>
 
         <section className="ls-data-section conditions-section" aria-label="Street conditions" data-testid="section-conditions">
-          <div className="ls-section-label"><strong>Restrictions & reports</strong><span>Permitted / recent</span></div>
+          <div className="ls-section-label"><strong>Street conditions</strong><span>Permits: 14 days · 311: 7 days</span></div>
           <div className="ls-data-list">
             {conditionsQuery.isLoading && <><div className="ls-loading-line" /><div className="ls-loading-line" /></>}
             {conditionsQuery.isError && <p className="ls-search-error" role="status" data-testid="status-conditions-error">Street condition data unavailable.</p>}
@@ -222,30 +284,45 @@ function App() {
       </aside>
 
       <section className="ls-map-wrap" aria-label="San Francisco bicycle route map" data-testid="map-panel">
-        <MapContainer center={SF_CENTER} zoom={13} scrollWheelZoom className="leaflet-container" zoomControl={false} data-testid="street-map">
+        <MapContainer center={SF_CENTER} zoom={11} scrollWheelZoom preferCanvas className="ls-leaflet" zoomControl={false} data-testid="street-map">
           <TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>' url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png" />
-          <ZoomToRoute route={route} />
-          {layers.network && segments.map((segment) => <GeoJSON key={segment.id} data={segment.geometry as never} style={() => facilityStyle(segment)}>
-            <Popup><strong>{segment.streetName}</strong><br />{segmentDescription(segment)}<br />{segment.fromStreet && segment.toStreet ? `${segment.fromStreet} to ${segment.toStreet}` : ''}<br />SFMTA inventory{segment.dataAsOf ? ` · ${formatDate(segment.dataAsOf)}` : ''}</Popup>
-          </GeoJSON>)}
+          <FitCitywide />
+          {layers.network && networkGeoJson.features.length > 0 && <GeoJSON
+            key={`sf-network-${networkQuery.data?.sourceUpdatedAt ?? 'loading'}`}
+            data={networkGeoJson as never}
+            style={(feature) => {
+              const segment = (feature?.properties as { segment?: BikeLaneSegment } | null)?.segment;
+              return segment ? facilityStyle(segment) : {};
+            }}
+            onEachFeature={(feature, layer) => {
+              const segment = (feature.properties as { segment?: BikeLaneSegment } | null)?.segment;
+              if (segment) layer.bindPopup(networkPopupContent(segment));
+            }}
+          />}
           {layers.stations && stations.map((station) => <CircleMarker key={station.id} center={[station.latitude, station.longitude]} radius={7} pathOptions={{ color: '#286c53', weight: 2, fillColor: '#70a881', fillOpacity: 0.92 }}>
             <Popup><strong>{station.name}</strong><br />{station.bikesAvailable} bikes · {station.ebikesAvailable} e-bikes<br />{station.docksAvailable} docks available<br />{station.isRenting ? 'Rentals available' : 'Not renting'} · {station.isReturning ? 'Returns accepted' : 'Returns unavailable'}<br />Last reported {formatDate(station.lastReported)}</Popup>
           </CircleMarker>)}
           {layers.closures && closures.map((closure) => <ConditionGeometry key={closure.id} closure={closure} visible={layers.closures} />)}
           {layers.reports && reports.map((report) => <ReportMarker key={report.id} report={report} />)}
-          {route && routeCoordinates(route).length > 0 && <>
-            <Polyline positions={routeCoordinates(route)} pathOptions={{ color: '#fffef8', weight: 10, opacity: 0.92, lineCap: 'round', lineJoin: 'round' }} />
-            <Polyline positions={routeCoordinates(route)} pathOptions={{ color: '#267b5b', weight: 6, opacity: 0.96, lineCap: 'round', lineJoin: 'round' }}>
-              <Popup><strong>Low-traffic bicycle route</strong><br />Based on the OpenStreetMap street network. Not guaranteed to be protected throughout.</Popup>
+          {route && routeLaneCoordinates(route).length > 0 && <>
+            {routeConnectorCoordinates(route).map((positions, index) => <Fragment key={`connector-${index}`}>
+              <Polyline positions={positions} pathOptions={{ color: '#fffef8', weight: 9, opacity: 0.94, lineCap: 'round', lineJoin: 'round' }} />
+              <Polyline positions={positions} pathOptions={{ color: '#b17a2c', weight: 4, opacity: 0.96, dashArray: '6 6', lineCap: 'round', lineJoin: 'round' }}>
+                <Popup><strong>Street connector</strong><br />Routed on the OpenStreetMap low-traffic bicycle network. This section is not labeled as an SFMTA bike lane.</Popup>
+              </Polyline>
+            </Fragment>)}
+            <Polyline positions={routeLaneCoordinates(route)} pathOptions={{ color: '#fffef8', weight: 10, opacity: 0.94, lineCap: 'round', lineJoin: 'round' }} />
+            <Polyline positions={routeLaneCoordinates(route)} pathOptions={{ color: '#244f83', weight: 6, opacity: 0.98, lineCap: 'round', lineJoin: 'round' }}>
+              <Popup><strong>Official mapped bikeway route</strong><br />Direction-aware SFMTA Class I, II and IV facilities · data updated {formatDate(route.networkUpdatedAt)}.</Popup>
             </Polyline>
             <CircleMarker center={[route.origin.latitude, route.origin.longitude]} radius={8} pathOptions={{ color: '#287258', weight: 3, fillColor: '#fffdf5', fillOpacity: 1 }}><Popup><strong>Origin</strong><br />{route.origin.label}</Popup></CircleMarker>
             <CircleMarker center={[route.destination.latitude, route.destination.longitude]} radius={8} pathOptions={{ color: '#fffdf5', weight: 3, fillColor: '#287258', fillOpacity: 1 }}><Popup><strong>Destination</strong><br />{route.destination.label}</Popup></CircleMarker>
           </>}
           <MapZoomButtons />
         </MapContainer>
-        <div className="ls-route-label" data-testid="route-map-label"><span className="ls-live-dot" /><div><small>{route ? 'LOW-TRAFFIC OSM BIKE ROUTE' : 'SAN FRANCISCO STREET MAP'}</small><strong>{route ? `${route.origin.label} → ${route.destination.label}` : 'Citywide bicycle infrastructure'}</strong></div></div>
+        <div className="ls-route-label" data-testid="route-map-label"><span className="ls-live-dot" /><div><small>{route ? 'SFMTA BIKEWAY ROUTE' : 'SAN FRANCISCO STREET MAP'}</small><strong>{route ? `${route.origin.label} → ${route.destination.label}` : 'Citywide bicycle infrastructure'}</strong></div></div>
         <div className="ls-map-layers" aria-label="Map layers" data-testid="map-layer-controls">
-          {layerButton('network', 'Bike lanes', ShieldCheck)}
+          {layerButton('network', 'Bike network', ShieldCheck)}
           {layerButton('stations', 'Bay Wheels', Bike)}
           {layerButton('closures', 'Restrictions', RotateCw)}
           {layerButton('reports', 'Open 311', MapPin)}

@@ -15,5 +15,10 @@ export interface BikeRouteResponse {
   durationSeconds: number;
   profile: string;
   source: string;
+  laneDistanceMeters: number;
+  connectorDistanceMeters: number;
+  networkUpdatedAt: string;
+  laneCoordinates: Coordinate[];
+  connectorCoordinates: Coordinate[][];
   coordinates: Coordinate[];
 }

@@ -1,7 +1,6 @@
 import {
   type BikeLaneSegment,
   type BikeNetworkResponse,
-  type BikeRouteResponse,
   type BikeStation,
   type BikeStationsResponse,
   type StreetClosure,
@@ -16,15 +15,8 @@ const CITY_BOUNDS = {
   east: -122.355,
 };
 
-const ROUTING_PROFILE = "fastbike-verylowtraffic";
 const APP_USER_AGENT = "LaneSight/1.0 (San Francisco bicycle route planner)";
 const cache = new Map<string, { expiresAt: number; value: unknown }>();
-const geocodeCache = new Map<
-  string,
-  { expiresAt: number; value: { label: string; latitude: number; longitude: number } }
->();
-let geocodeQueue: Promise<void> = Promise.resolve();
-let lastGeocodeRequestAt = 0;
 
 type JsonRecord = Record<string, unknown>;
 
@@ -71,11 +63,11 @@ function isoFromEpoch(value: unknown): string | null {
   return new Date(epoch * 1000).toISOString();
 }
 
-function isoOrNow(value: unknown): string {
+function parseIso(value: unknown): string | null {
   const raw = text(value);
-  if (!raw) return new Date().toISOString();
+  if (!raw) return null;
   const parsed = new Date(raw);
-  return Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
 function withinCity(latitude: number, longitude: number): boolean {
@@ -126,18 +118,22 @@ export async function getBikeNetwork(): Promise<BikeNetworkResponse> {
     url.searchParams.set("$limit", "6000");
     url.searchParams.set(
       "$select",
-      "objectid,streetname,facility_t,symbology,from_st,to_st,sharrow,buffered,raised,contraflow,data_as_of,data_loaded_at,shape",
+      "objectid,streetname,facility_t,symbology,from_st,to_st,sharrow,buffered,raised,contraflow,dir,direct,data_as_of,data_loaded_at,shape",
     );
 
     const collection = record(await fetchJson(url, "application/geo+json"));
     const features = Array.isArray(collection.features) ? collection.features : [];
     const segments: BikeLaneSegment[] = [];
+    const loadedAtValues: string[] = [];
 
     for (const feature of features) {
       const item = record(feature);
       const properties = record(item.properties);
       const geometry = lineString(item.geometry);
       if (!geometry) continue;
+      if (typeof properties.data_loaded_at === "string") {
+        loadedAtValues.push(properties.data_loaded_at);
+      }
 
       segments.push({
         id: text(properties.objectid, `segment-${segments.length}`),
@@ -150,6 +146,8 @@ export async function getBikeNetwork(): Promise<BikeNetworkResponse> {
         buffered: flag(properties.buffered),
         raised: flag(properties.raised),
         contraflow: flag(properties.contraflow),
+        direction: typeof properties.dir === "string" ? properties.dir : null,
+        direct: typeof properties.direct === "string" ? properties.direct : null,
         dataAsOf: typeof properties.data_as_of === "string" ? properties.data_as_of : null,
         geometry,
       });
@@ -159,9 +157,10 @@ export async function getBikeNetwork(): Promise<BikeNetworkResponse> {
       throw new Error("The city bikeway feed returned no usable line features.");
     }
 
-    const sourceUpdatedAt =
-      maxTimestamp(segments.flatMap((segment) => (segment.dataAsOf ? [segment.dataAsOf] : []))) ??
-      new Date().toISOString();
+    const sourceUpdatedAt = maxTimestamp(loadedAtValues);
+    if (!sourceUpdatedAt) {
+      throw new Error("The city bikeway feed did not include an as-of date.");
+    }
 
     return {
       sourceUpdatedAt,
@@ -206,18 +205,26 @@ export async function getBikeStations(): Promise<BikeStationsResponse> {
       if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) continue;
       if (!withinCity(latitude, longitude)) continue;
 
+      const bikesAvailable = Number(stationStatusRow.num_bikes_available);
+      const ebikesAvailable = Number(stationStatusRow.num_ebikes_available);
+      const docksAvailable = Number(stationStatusRow.num_docks_available);
+      if (
+        !Number.isFinite(bikesAvailable) ||
+        !Number.isFinite(ebikesAvailable) ||
+        !Number.isFinite(docksAvailable)
+      ) {
+        continue;
+      }
+
       stations.push({
         id,
         name: text(info.name, "Bay Wheels station"),
         shortName: typeof info.short_name === "string" ? info.short_name : null,
         latitude,
         longitude,
-        bikesAvailable: Math.max(0, Math.trunc(number(stationStatusRow.num_bikes_available))),
-        ebikesAvailable: Math.max(
-          0,
-          Math.trunc(number(stationStatusRow.num_ebikes_available)),
-        ),
-        docksAvailable: Math.max(0, Math.trunc(number(stationStatusRow.num_docks_available))),
+        bikesAvailable: Math.max(0, Math.trunc(bikesAvailable)),
+        ebikesAvailable: Math.max(0, Math.trunc(ebikesAvailable)),
+        docksAvailable: Math.max(0, Math.trunc(docksAvailable)),
         capacity:
           info.capacity === undefined || info.capacity === null
             ? null
@@ -235,9 +242,14 @@ export async function getBikeStations(): Promise<BikeStationsResponse> {
       throw new Error("The Bay Wheels feed returned no active San Francisco stations.");
     }
 
+    const updatedAt = isoFromEpoch(status.last_updated);
+    if (!updatedAt) {
+      throw new Error("The Bay Wheels status feed did not include an update timestamp.");
+    }
+
     return {
       fetchedAt: new Date().toISOString(),
-      updatedAt: isoFromEpoch(status.last_updated) ?? new Date().toISOString(),
+      updatedAt,
       ttlSeconds: Math.max(1, Math.trunc(number(status.ttl, 60))),
       stations,
     };
@@ -251,16 +263,19 @@ function soqlTimestamp(value: Date): string {
 function toStreetClosure(row: unknown): StreetClosure | null {
   const item = record(row);
   const geometry = lineString(item.shape);
-  if (!geometry) return null;
+  const id = text(item.objectid);
+  const startAt = parseIso(item.start_utc);
+  const endAt = parseIso(item.end_utc);
+  const street = text(item.street);
+  if (!geometry || !id || !startAt || !endAt || !street) return null;
 
-  const street = text(item.street, "Street restriction");
   return {
-    id: text(item.objectid),
+    id,
     name: text(item.case_name, street),
     type: text(item.type, "Street permit"),
     status: text(item.status, "Permitted"),
-    startAt: isoOrNow(item.start_utc),
-    endAt: isoOrNow(item.end_utc),
+    startAt,
+    endAt,
     street,
     fromStreet: typeof item.from_st === "string" ? item.from_st : null,
     toStreet: typeof item.to_st === "string" ? item.to_st : null,
@@ -282,16 +297,20 @@ function toStreetReport(row: unknown): StreetReport | null {
   const coordinates = Array.isArray(point.coordinates) ? point.coordinates : [];
   const longitude = number(coordinates[0], Number.NaN);
   const latitude = number(coordinates[1], Number.NaN);
-  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+  const id = text(item.service_request_id);
+  const reportedAt = parseIso(item.requested_datetime);
+  if (!id || !reportedAt || !Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    return null;
+  }
 
   const isDefect = text(item.service_name) === "Street Defect";
   return {
-    id: text(item.service_request_id),
+    id,
     category: isDefect ? "Pavement defect report" : "Reported obstruction",
     detail: reportDetail(item.service_details ?? item.service_subtype),
     address: text(item.address, "Address not provided"),
     status: text(item.status_description, "Open"),
-    reportedAt: isoOrNow(item.requested_datetime),
+    reportedAt,
     latitude,
     longitude,
   };
@@ -348,132 +367,3 @@ export async function getStreetConditions(): Promise<StreetConditionsResponse> {
   });
 }
 
-export class PlaceNotFoundError extends Error {
-  constructor(place: string) {
-    super(`Could not find “${place}” within San Francisco.`);
-    this.name = "PlaceNotFoundError";
-  }
-}
-
-interface ResolvedPlace {
-  label: string;
-  latitude: number;
-  longitude: number;
-}
-
-async function withGeocoderLimit<T>(operation: () => Promise<T>): Promise<T> {
-  const previous = geocodeQueue;
-  let release: () => void = () => undefined;
-  geocodeQueue = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-
-  await previous;
-  try {
-    const waitMs = Math.max(0, 1_100 - (Date.now() - lastGeocodeRequestAt));
-    if (waitMs > 0) {
-      await new Promise((resolve) => setTimeout(resolve, waitMs));
-    }
-    lastGeocodeRequestAt = Date.now();
-    return await operation();
-  } finally {
-    release();
-  }
-}
-
-async function resolvePlace(input: string): Promise<ResolvedPlace> {
-  const place = input.trim();
-  const key = place.toLocaleLowerCase();
-  const saved = geocodeCache.get(key);
-  if (saved && saved.expiresAt > Date.now()) return saved.value;
-
-  return withGeocoderLimit(async () => {
-    const recent = geocodeCache.get(key);
-    if (recent && recent.expiresAt > Date.now()) return recent.value;
-
-    const searchQuery = /san francisco/i.test(place)
-      ? place
-      : `${place}, San Francisco, CA`;
-    const url = new URL("https://nominatim.openstreetmap.org/search");
-    url.searchParams.set("format", "jsonv2");
-    url.searchParams.set("q", searchQuery);
-    url.searchParams.set("limit", "1");
-    url.searchParams.set("countrycodes", "us");
-    url.searchParams.set(
-      "viewbox",
-      `${CITY_BOUNDS.west},${CITY_BOUNDS.north},${CITY_BOUNDS.east},${CITY_BOUNDS.south}`,
-    );
-    url.searchParams.set("bounded", "1");
-
-    const response = await fetch(url, {
-      headers: {
-        Accept: "application/json",
-        "User-Agent": APP_USER_AGENT,
-      },
-      signal: AbortSignal.timeout(15_000),
-    });
-    if (!response.ok) {
-      throw new Error(`The place search service returned HTTP ${response.status}.`);
-    }
-
-    const matches = (await response.json()) as Array<{
-      lat?: string;
-      lon?: string;
-      display_name?: string;
-    }>;
-    const match = matches[0];
-    const latitude = number(match?.lat, Number.NaN);
-    const longitude = number(match?.lon, Number.NaN);
-    if (!match || !Number.isFinite(latitude) || !Number.isFinite(longitude)) {
-      throw new PlaceNotFoundError(place);
-    }
-    if (!withinCity(latitude, longitude)) {
-      throw new PlaceNotFoundError(place);
-    }
-
-    const value = {
-      label: text(match.display_name, place),
-      latitude,
-      longitude,
-    };
-    geocodeCache.set(key, { expiresAt: Date.now() + 24 * 60 * 60 * 1000, value });
-    return value;
-  });
-}
-
-export async function planBikeRoute(
-  originText: string,
-  destinationText: string,
-): Promise<BikeRouteResponse> {
-  const origin = await resolvePlace(originText);
-  const destination = await resolvePlace(destinationText);
-  const url = new URL("https://brouter.de/brouter");
-  url.searchParams.set(
-    "lonlats",
-    `${origin.longitude},${origin.latitude}|${destination.longitude},${destination.latitude}`,
-  );
-  url.searchParams.set("profile", ROUTING_PROFILE);
-  url.searchParams.set("alternativeidx", "0");
-  url.searchParams.set("format", "geojson");
-
-  const result = record(await fetchJson(url, "application/geo+json"));
-  const features = Array.isArray(result.features) ? result.features : [];
-  const feature = record(features[0]);
-  const properties = record(feature.properties);
-  const geometry = lineString(feature.geometry);
-  const distanceMeters = number(properties["track-length"], Number.NaN);
-  const durationSeconds = number(properties["total-time"], Number.NaN);
-  if (!geometry || !Number.isFinite(distanceMeters) || !Number.isFinite(durationSeconds)) {
-    throw new Error("The bicycle router returned no usable route.");
-  }
-
-  return {
-    origin,
-    destination,
-    distanceMeters,
-    durationSeconds,
-    profile: ROUTING_PROFILE,
-    source: "OpenStreetMap via BRouter",
-    coordinates: geometry.coordinates,
-  };
-}

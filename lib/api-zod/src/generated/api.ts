@@ -39,6 +39,8 @@ export const GetBikeNetworkResponse = zod.object({
   "buffered": zod.boolean(),
   "raised": zod.boolean(),
   "contraflow": zod.boolean(),
+  "direction": zod.string().nullable().describe('Compass direction of travel for this SFMTA feature.'),
+  "direct": zod.string().nullable().describe('Whether the mapped facility is one-way or two-way.'),
   "dataAsOf": zod.string().nullish(),
   "geometry": zod.object({
   "type": zod.enum(['LineString']),
@@ -113,7 +115,7 @@ export const GetStreetConditionsResponse = zod.object({
 
 
 /**
- * @summary Geocode San Francisco places and calculate a low-traffic bike route
+ * @summary Route on official SFMTA bikeways with OSM street connectors
  */
 export const planBikeRouteBodyOriginMin = 2;
 export const planBikeRouteBodyOriginMax = 160;
@@ -127,6 +129,12 @@ export const PlanBikeRouteBody = zod.object({
   "origin": zod.string().min(planBikeRouteBodyOriginMin).max(planBikeRouteBodyOriginMax),
   "destination": zod.string().min(planBikeRouteBodyDestinationMin).max(planBikeRouteBodyDestinationMax)
 })
+
+export const planBikeRouteResponseLaneCoordinatesItemMin = 2;
+export const planBikeRouteResponseLaneCoordinatesItemMax = 2;
+
+export const planBikeRouteResponseConnectorCoordinatesItemItemMin = 2;
+export const planBikeRouteResponseConnectorCoordinatesItemItemMax = 2;
 
 export const planBikeRouteResponseCoordinatesItemMin = 2;
 export const planBikeRouteResponseCoordinatesItemMax = 2;
@@ -148,6 +156,11 @@ export const PlanBikeRouteResponse = zod.object({
   "durationSeconds": zod.number(),
   "profile": zod.string(),
   "source": zod.string(),
+  "laneDistanceMeters": zod.number(),
+  "connectorDistanceMeters": zod.number(),
+  "networkUpdatedAt": zod.string(),
+  "laneCoordinates": zod.array(zod.array(zod.number()).min(planBikeRouteResponseLaneCoordinatesItemMin).max(planBikeRouteResponseLaneCoordinatesItemMax)),
+  "connectorCoordinates": zod.array(zod.array(zod.array(zod.number()).min(planBikeRouteResponseConnectorCoordinatesItemItemMin).max(planBikeRouteResponseConnectorCoordinatesItemItemMax))),
   "coordinates": zod.array(zod.array(zod.number()).min(planBikeRouteResponseCoordinatesItemMin).max(planBikeRouteResponseCoordinatesItemMax))
 })
 

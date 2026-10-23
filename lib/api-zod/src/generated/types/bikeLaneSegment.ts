@@ -20,6 +20,16 @@ export interface BikeLaneSegment {
   buffered: boolean;
   raised: boolean;
   contraflow: boolean;
+  /**
+     * Compass direction of travel for this SFMTA feature.
+     * @nullable
+     */
+  direction: string | null;
+  /**
+     * Whether the mapped facility is one-way or two-way.
+     * @nullable
+     */
+  direct: string | null;
   /** @nullable */
   dataAsOf?: string | null;
   geometry: LineString;
