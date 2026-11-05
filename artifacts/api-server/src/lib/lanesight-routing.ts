@@ -1,9 +1,14 @@
 import type {
   BikeRouteResponse,
+  PlanBikeRouteResult,
   RouteEndpoint,
 } from "@workspace/api-zod";
-import { findMappedBikewayPath, type BikeCoordinate } from "./bikeway-graph";
+import type { BikeCoordinate } from "./bikeway-graph";
 import { getBikeNetwork } from "./lanesight-service";
+import {
+  attributeRouteToSfmta,
+  jaccardOverlap,
+} from "./sfmta-attribute";
 
 const CITY_BOUNDS = {
   south: 37.707,
@@ -12,8 +17,7 @@ const CITY_BOUNDS = {
   east: -122.355,
 };
 const APP_USER_AGENT = "LaneSight/1.0 (San Francisco bicycle route planner)";
-const CONNECTOR_PROFILE = "fastbike-verylowtraffic";
-const MAX_CONNECTOR_ROUTE_METERS = 2_500;
+const ROUTE_PROFILE = "fastbike-verylowtraffic";
 const geocodeCache = new Map<
   string,
   { expiresAt: number; value: RouteEndpoint }
@@ -60,18 +64,6 @@ function lineCoordinates(value: unknown): BikeCoordinate[] | null {
   return coordinates.length >= 2 ? coordinates : null;
 }
 
-function distanceMeters(a: BikeCoordinate, b: BikeCoordinate): number {
-  const earthRadiusMeters = 6_371_000;
-  const lat1 = (a[1] * Math.PI) / 180;
-  const lat2 = (b[1] * Math.PI) / 180;
-  const deltaLat = lat2 - lat1;
-  const deltaLon = ((b[0] - a[0]) * Math.PI) / 180;
-  const haversine =
-    Math.sin(deltaLat / 2) ** 2 +
-    Math.cos(lat1) * Math.cos(lat2) * Math.sin(deltaLon / 2) ** 2;
-  return 2 * earthRadiusMeters * Math.asin(Math.sqrt(haversine));
-}
-
 function withinCity(latitude: number, longitude: number): boolean {
   return (
     latitude >= CITY_BOUNDS.south &&
@@ -88,12 +80,20 @@ export class PlaceNotFoundError extends Error {
   }
 }
 
+/** @deprecated kept for route error mapping during transition */
 export class NoMappedBikewayRouteError extends Error {
   constructor() {
     super(
       "No continuous, direction-aware route on the mapped SFMTA bike-lane network connects these places. Try nearby starting points.",
     );
     this.name = "NoMappedBikewayRouteError";
+  }
+}
+
+export class BikeRoutingUnavailableError extends Error {
+  constructor(message = "Route planning is temporarily unavailable. Please try again.") {
+    super(message);
+    this.name = "BikeRoutingUnavailableError";
   }
 }
 
@@ -149,7 +149,9 @@ async function resolvePlace(input: string): Promise<RouteEndpoint> {
       signal: AbortSignal.timeout(15_000),
     });
     if (!response.ok) {
-      throw new Error(`The place search service returned HTTP ${response.status}.`);
+      throw new BikeRoutingUnavailableError(
+        `The place search service returned HTTP ${response.status}.`,
+      );
     }
 
     const matches = (await response.json()) as Array<{
@@ -175,29 +177,33 @@ async function resolvePlace(input: string): Promise<RouteEndpoint> {
   });
 }
 
-async function routeStreetConnector(
+async function routeWithBRouter(
   from: BikeCoordinate,
   to: BikeCoordinate,
+  alternativeIndex: number,
 ): Promise<RoutedLine> {
-  if (distanceMeters(from, to) < 2) {
-    return { coordinates: [from, to], distanceMeters: 0, durationSeconds: 0 };
-  }
-
   const url = new URL("https://brouter.de/brouter");
   url.searchParams.set("lonlats", `${from[0]},${from[1]}|${to[0]},${to[1]}`);
-  url.searchParams.set("profile", CONNECTOR_PROFILE);
-  url.searchParams.set("alternativeidx", "0");
+  url.searchParams.set("profile", ROUTE_PROFILE);
+  url.searchParams.set("alternativeidx", String(alternativeIndex));
   url.searchParams.set("format", "geojson");
 
-  const response = await fetch(url, {
-    headers: {
-      Accept: "application/geo+json",
-      "User-Agent": APP_USER_AGENT,
-    },
-    signal: AbortSignal.timeout(25_000),
-  });
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      headers: {
+        Accept: "application/geo+json",
+        "User-Agent": APP_USER_AGENT,
+      },
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch {
+    throw new BikeRoutingUnavailableError();
+  }
   if (!response.ok) {
-    throw new Error(`The bicycle connector service returned HTTP ${response.status}.`);
+    throw new BikeRoutingUnavailableError(
+      `The bicycle routing service returned HTTP ${response.status}.`,
+    );
   }
 
   const featureCollection = record(await response.json());
@@ -216,85 +222,165 @@ async function routeStreetConnector(
     distance < 0 ||
     duration < 0
   ) {
-    throw new Error("The bicycle connector service returned no usable street route.");
+    throw new BikeRoutingUnavailableError(
+      "The bicycle routing service returned no usable route.",
+    );
   }
   return { coordinates, distanceMeters: distance, durationSeconds: duration };
 }
 
-function combineCoordinates(parts: BikeCoordinate[][]): BikeCoordinate[] {
-  const combined: BikeCoordinate[] = [];
-  for (const part of parts) {
-    for (const point of part) {
-      const previous = combined[combined.length - 1];
-      if (!previous || distanceMeters(previous, point) >= 1) combined.push(point);
-    }
+function toBikeRouteResponse(
+  origin: RouteEndpoint,
+  destination: RouteEndpoint,
+  routed: RoutedLine,
+  attribution: ReturnType<typeof attributeRouteToSfmta>,
+  label: string,
+  networkUpdatedAt: string,
+): BikeRouteResponse {
+  return {
+    origin,
+    destination,
+    label,
+    distanceMeters: routed.distanceMeters,
+    durationSeconds: routed.durationSeconds,
+    designatedPercent: attribution.designatedPercent,
+    mixedTrafficMeters: attribution.mixedTrafficMeters,
+    transitionCount: attribution.transitions.length,
+    profile: "BRouter low-traffic bike + SFMTA facility attribution",
+    source: "OpenStreetMap via BRouter · SFMTA Bike Network",
+    laneDistanceMeters: attribution.laneDistanceMeters,
+    connectorDistanceMeters: attribution.connectorDistanceMeters,
+    networkUpdatedAt,
+    laneCoordinates: attribution.laneCoordinates,
+    connectorCoordinates: attribution.connectorCoordinates,
+    coordinates: attribution.coordinates,
+    segments: attribution.segments.map((segment) => ({
+      coordinates: segment.coordinates,
+      distanceMeters: segment.distanceMeters,
+      facility: segment.facility,
+      designated: segment.designated,
+      source: segment.source,
+    })),
+    transitions: attribution.transitions,
+  };
+}
+
+function areDistinct(a: BikeRouteResponse, b: BikeRouteResponse): boolean {
+  const overlap = jaccardOverlap(
+    a.coordinates as BikeCoordinate[],
+    b.coordinates as BikeCoordinate[],
+  );
+  const percentDelta = Math.abs(a.designatedPercent - b.designatedPercent);
+  const durationDelta = Math.abs(a.durationSeconds - b.durationSeconds);
+  return overlap < 0.85 || percentDelta >= 5 || durationDelta >= 120;
+}
+
+function orderRoutes(
+  candidates: BikeRouteResponse[],
+): { selectedIndex: number; routes: BikeRouteResponse[] } {
+  if (candidates.length === 0) {
+    throw new BikeRoutingUnavailableError();
   }
-  return combined;
+  if (candidates.length === 1 || !areDistinct(candidates[0], candidates[1])) {
+    const only = { ...candidates[0], label: "Route" };
+    return { selectedIndex: 0, routes: [only] };
+  }
+
+  const [first, second] = candidates;
+  const byDesignated = [...candidates].sort((a, b) => {
+    if (b.designatedPercent !== a.designatedPercent) {
+      return b.designatedPercent - a.designatedPercent;
+    }
+    return b.durationSeconds - a.durationSeconds;
+  });
+
+  if (first.designatedPercent === second.designatedPercent) {
+    const durationDelta = Math.abs(first.durationSeconds - second.durationSeconds);
+    if (durationDelta < 120) {
+      return { selectedIndex: 0, routes: [{ ...byDesignated[0], label: "Route" }] };
+    }
+    const longer =
+      first.durationSeconds >= second.durationSeconds ? first : second;
+    const shorter =
+      first.durationSeconds < second.durationSeconds ? first : second;
+    return {
+      selectedIndex: 0,
+      routes: [
+        { ...longer, label: "More lanes" },
+        { ...shorter, label: "Faster" },
+      ],
+    };
+  }
+
+  const moreLanes = byDesignated[0];
+  const faster = [...candidates].sort(
+    (a, b) => a.durationSeconds - b.durationSeconds,
+  )[0];
+  if (moreLanes === faster || moreLanes.coordinates === faster.coordinates) {
+    const other = candidates.find((route) => route !== moreLanes) ?? candidates[1];
+    return {
+      selectedIndex: 0,
+      routes: [
+        { ...moreLanes, label: "More lanes" },
+        { ...other, label: "Faster" },
+      ],
+    };
+  }
+  return {
+    selectedIndex: 0,
+    routes: [
+      { ...moreLanes, label: "More lanes" },
+      { ...faster, label: "Faster" },
+    ],
+  };
 }
 
 export async function planBikeRoute(
   originText: string,
   destinationText: string,
-): Promise<BikeRouteResponse> {
+): Promise<PlanBikeRouteResult> {
   const origin = await resolvePlace(originText);
   const destination = await resolvePlace(destinationText);
   const network = await getBikeNetwork();
-  const lanePath = findMappedBikewayPath(
-    network,
-    [origin.longitude, origin.latitude],
-    [destination.longitude, destination.latitude],
-  );
-  if (!lanePath) throw new NoMappedBikewayRouteError();
+  const from: BikeCoordinate = [origin.longitude, origin.latitude];
+  const to: BikeCoordinate = [destination.longitude, destination.latitude];
 
-  const start: BikeCoordinate = [
-    lanePath.startCoordinate[0],
-    lanePath.startCoordinate[1],
-  ];
-  const end: BikeCoordinate = [
-    lanePath.endCoordinate[0],
-    lanePath.endCoordinate[1],
-  ];
-  const [startConnector, endConnector] = await Promise.all([
-    routeStreetConnector([origin.longitude, origin.latitude], start),
-    routeStreetConnector(end, [destination.longitude, destination.latitude]),
-  ]);
-
-  if (
-    startConnector.distanceMeters > MAX_CONNECTOR_ROUTE_METERS ||
-    endConnector.distanceMeters > MAX_CONNECTOR_ROUTE_METERS
-  ) {
-    throw new NoMappedBikewayRouteError();
+  const primary = await routeWithBRouter(from, to, 0);
+  let secondary: RoutedLine | null = null;
+  try {
+    secondary = await routeWithBRouter(from, to, 1);
+  } catch {
+    secondary = null;
   }
 
-  const connectorCoordinates = [
-    startConnector.coordinates,
-    endConnector.coordinates,
+  const attributedPrimary = attributeRouteToSfmta(primary.coordinates, network);
+  const candidates: BikeRouteResponse[] = [
+    toBikeRouteResponse(
+      origin,
+      destination,
+      primary,
+      attributedPrimary,
+      "Route",
+      network.sourceUpdatedAt,
+    ),
   ];
-  const coordinates = combineCoordinates([
-    startConnector.coordinates,
-    lanePath.laneCoordinates,
-    endConnector.coordinates,
-  ]);
-  const connectorDistanceMeters =
-    startConnector.distanceMeters + endConnector.distanceMeters;
-  const distance = connectorDistanceMeters + lanePath.laneDistanceMeters;
-  const duration =
-    startConnector.durationSeconds +
-    endConnector.durationSeconds +
-    lanePath.laneDistanceMeters / 4;
 
-  return {
-    origin,
-    destination,
-    distanceMeters: distance,
-    durationSeconds: duration,
-    profile: "SFMTA Class I/II/IV bikeways with low-traffic OSM connectors",
-    source: "SFMTA Bike Network + OpenStreetMap via BRouter",
-    laneDistanceMeters: lanePath.laneDistanceMeters,
-    connectorDistanceMeters,
-    networkUpdatedAt: network.sourceUpdatedAt,
-    laneCoordinates: lanePath.laneCoordinates,
-    connectorCoordinates,
-    coordinates,
-  };
+  if (secondary) {
+    const attributedSecondary = attributeRouteToSfmta(
+      secondary.coordinates,
+      network,
+    );
+    candidates.push(
+      toBikeRouteResponse(
+        origin,
+        destination,
+        secondary,
+        attributedSecondary,
+        "Route",
+        network.sourceUpdatedAt,
+      ),
+    );
+  }
+
+  return orderRoutes(candidates);
 }

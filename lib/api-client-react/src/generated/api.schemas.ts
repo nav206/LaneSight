@@ -142,18 +142,74 @@ export interface RouteEndpoint {
   longitude: number;
 }
 
+export type RouteFacility = typeof RouteFacility[keyof typeof RouteFacility];
+
+
+export const RouteFacility = {
+  protected: 'protected',
+  bike_lane: 'bike_lane',
+  shared: 'shared',
+  ordinary: 'ordinary',
+} as const;
+
+export type RouteSegmentSource = typeof RouteSegmentSource[keyof typeof RouteSegmentSource];
+
+
+export const RouteSegmentSource = {
+  sfmta: 'sfmta',
+  unmatched: 'unmatched',
+} as const;
+
+export interface RouteSegment {
+  /** @minItems 2 */
+  coordinates: Coordinate[];
+  distanceMeters: number;
+  facility: RouteFacility;
+  designated: boolean;
+  source: RouteSegmentSource;
+}
+
+export interface RouteTransition {
+  latitude: number;
+  longitude: number;
+  fromFacility: RouteFacility;
+  toFacility: RouteFacility;
+  warning: string;
+}
+
 export interface BikeRouteResponse {
   origin: RouteEndpoint;
   destination: RouteEndpoint;
+  /** Display label such as More lanes or Faster */
+  label: string;
   distanceMeters: number;
   durationSeconds: number;
+  designatedPercent: number;
+  mixedTrafficMeters: number;
+  transitionCount: number;
   profile: string;
   source: string;
+  /** Distance on designated SFMTA facilities (Class I/II/IV) */
   laneDistanceMeters: number;
+  /** Distance not on designated facilities (ordinary/shared) */
   connectorDistanceMeters: number;
   networkUpdatedAt: string;
+  /** Concatenated designated segment geometry */
   laneCoordinates: Coordinate[];
+  /** Non-designated polylines for map styling */
   connectorCoordinates: Coordinate[][];
   coordinates: Coordinate[];
+  segments: RouteSegment[];
+  transitions: RouteTransition[];
+}
+
+export interface PlanBikeRouteResult {
+  /** @minimum 0 */
+  selectedIndex: number;
+  /**
+     * @minItems 1
+     * @maxItems 2
+     */
+  routes: BikeRouteResponse[];
 }
 

@@ -23,9 +23,9 @@ import type {
   ApiError,
   BikeNetworkResponse,
   BikeRouteRequest,
-  BikeRouteResponse,
   BikeStationsResponse,
   HealthStatus,
+  PlanBikeRouteResult,
   StreetConditionsResponse
 } from './api.schemas';
 
@@ -374,9 +374,9 @@ export const getPlanBikeRouteUrl = () => {
 }
 
 /**
- * @summary Route on official SFMTA bikeways with OSM street connectors
+ * @summary Citywide SF bicycle route with SFMTA facility attribution and optional alternatives
  */
-export const planBikeRoute = async (bikeRouteRequest: BikeRouteRequest, options?: Parameters<typeof customFetch>[1]): Promise<BikeRouteResponse> => {
+export const planBikeRoute = async (bikeRouteRequest: BikeRouteRequest, options?: Parameters<typeof customFetch>[1]): Promise<PlanBikeRouteResult> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -392,7 +392,7 @@ export const planBikeRoute = async (bikeRouteRequest: BikeRouteRequest, options?
     }
     return headers;
   };
-return customFetch<BikeRouteResponse>(getPlanBikeRouteUrl(),
+return customFetch<PlanBikeRouteResult>(getPlanBikeRouteUrl(),
   {
     ...options,
     method: 'POST',
@@ -440,7 +440,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type PlanBikeRouteMutationVariables = {data: BodyType<BikeRouteRequest>}
 
     /**
- * @summary Route on official SFMTA bikeways with OSM street connectors
+ * @summary Citywide SF bicycle route with SFMTA facility attribution and optional alternatives
  */
 export const usePlanBikeRoute = <TError = ErrorType<ApiError>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof planBikeRoute>>, TError,PlanBikeRouteMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}

@@ -115,7 +115,7 @@ export const GetStreetConditionsResponse = zod.object({
 
 
 /**
- * @summary Route on official SFMTA bikeways with OSM street connectors
+ * @summary Citywide SF bicycle route with SFMTA facility attribution and optional alternatives
  */
 export const planBikeRouteBodyOriginMin = 2;
 export const planBikeRouteBodyOriginMax = 160;
@@ -130,18 +130,29 @@ export const PlanBikeRouteBody = zod.object({
   "destination": zod.string().min(planBikeRouteBodyDestinationMin).max(planBikeRouteBodyDestinationMax)
 })
 
-export const planBikeRouteResponseLaneCoordinatesItemMin = 2;
-export const planBikeRouteResponseLaneCoordinatesItemMax = 2;
+export const planBikeRouteResponseSelectedIndexMin = 0;
 
-export const planBikeRouteResponseConnectorCoordinatesItemItemMin = 2;
-export const planBikeRouteResponseConnectorCoordinatesItemItemMax = 2;
+export const planBikeRouteResponseRoutesItemLaneCoordinatesItemMin = 2;
+export const planBikeRouteResponseRoutesItemLaneCoordinatesItemMax = 2;
 
-export const planBikeRouteResponseCoordinatesItemMin = 2;
-export const planBikeRouteResponseCoordinatesItemMax = 2;
+export const planBikeRouteResponseRoutesItemConnectorCoordinatesItemItemMin = 2;
+export const planBikeRouteResponseRoutesItemConnectorCoordinatesItemItemMax = 2;
+
+export const planBikeRouteResponseRoutesItemCoordinatesItemMin = 2;
+export const planBikeRouteResponseRoutesItemCoordinatesItemMax = 2;
+
+export const planBikeRouteResponseRoutesItemSegmentsItemCoordinatesItemMin = 2;
+export const planBikeRouteResponseRoutesItemSegmentsItemCoordinatesItemMax = 2;
+
+export const planBikeRouteResponseRoutesItemSegmentsItemCoordinatesMin = 2;
+
+export const planBikeRouteResponseRoutesMax = 2;
 
 
 
 export const PlanBikeRouteResponse = zod.object({
+  "selectedIndex": zod.number().int().min(planBikeRouteResponseSelectedIndexMin),
+  "routes": zod.array(zod.object({
   "origin": zod.object({
   "label": zod.string(),
   "latitude": zod.number(),
@@ -152,16 +163,35 @@ export const PlanBikeRouteResponse = zod.object({
   "latitude": zod.number(),
   "longitude": zod.number()
 }),
+  "label": zod.string().describe('Display label such as More lanes or Faster'),
   "distanceMeters": zod.number(),
   "durationSeconds": zod.number(),
+  "designatedPercent": zod.number(),
+  "mixedTrafficMeters": zod.number(),
+  "transitionCount": zod.number().int(),
   "profile": zod.string(),
   "source": zod.string(),
-  "laneDistanceMeters": zod.number(),
-  "connectorDistanceMeters": zod.number(),
+  "laneDistanceMeters": zod.number().describe('Distance on designated SFMTA facilities (Class I/II/IV)'),
+  "connectorDistanceMeters": zod.number().describe('Distance not on designated facilities (ordinary/shared)'),
   "networkUpdatedAt": zod.string(),
-  "laneCoordinates": zod.array(zod.array(zod.number()).min(planBikeRouteResponseLaneCoordinatesItemMin).max(planBikeRouteResponseLaneCoordinatesItemMax)),
-  "connectorCoordinates": zod.array(zod.array(zod.array(zod.number()).min(planBikeRouteResponseConnectorCoordinatesItemItemMin).max(planBikeRouteResponseConnectorCoordinatesItemItemMax))),
-  "coordinates": zod.array(zod.array(zod.number()).min(planBikeRouteResponseCoordinatesItemMin).max(planBikeRouteResponseCoordinatesItemMax))
+  "laneCoordinates": zod.array(zod.array(zod.number()).min(planBikeRouteResponseRoutesItemLaneCoordinatesItemMin).max(planBikeRouteResponseRoutesItemLaneCoordinatesItemMax)).describe('Concatenated designated segment geometry'),
+  "connectorCoordinates": zod.array(zod.array(zod.array(zod.number()).min(planBikeRouteResponseRoutesItemConnectorCoordinatesItemItemMin).max(planBikeRouteResponseRoutesItemConnectorCoordinatesItemItemMax))).describe('Non-designated polylines for map styling'),
+  "coordinates": zod.array(zod.array(zod.number()).min(planBikeRouteResponseRoutesItemCoordinatesItemMin).max(planBikeRouteResponseRoutesItemCoordinatesItemMax)),
+  "segments": zod.array(zod.object({
+  "coordinates": zod.array(zod.array(zod.number()).min(planBikeRouteResponseRoutesItemSegmentsItemCoordinatesItemMin).max(planBikeRouteResponseRoutesItemSegmentsItemCoordinatesItemMax)).min(planBikeRouteResponseRoutesItemSegmentsItemCoordinatesMin),
+  "distanceMeters": zod.number(),
+  "facility": zod.enum(['protected', 'bike_lane', 'shared', 'ordinary']),
+  "designated": zod.boolean(),
+  "source": zod.enum(['sfmta', 'unmatched'])
+})),
+  "transitions": zod.array(zod.object({
+  "latitude": zod.number(),
+  "longitude": zod.number(),
+  "fromFacility": zod.enum(['protected', 'bike_lane', 'shared', 'ordinary']),
+  "toFacility": zod.enum(['protected', 'bike_lane', 'shared', 'ordinary']),
+  "warning": zod.string()
+}))
+})).min(1).max(planBikeRouteResponseRoutesMax)
 })
 
 

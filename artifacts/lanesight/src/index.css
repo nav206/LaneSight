@@ -74,6 +74,15 @@ button { cursor: pointer; }
 .ls-stat strong { display:block;font-size:13px;letter-spacing:-.4px; }
 .ls-stat span { display:block;font-size:8px;color:#849087;margin-top:1px; }
 .ls-stat-note { font-size:9px;color:#718077;line-height:1.5;margin:9px 0 0; }
+.ls-compare-row { display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0 4px; }
+.ls-compare-card { border:1px solid #cfd6cf;background:#fff;border-radius:10px;padding:10px 9px;text-align:left;cursor:pointer;display:flex;flex-direction:column;gap:2px; }
+.ls-compare-card.selected { border:2px solid #244f3a;background:#f4faf5; }
+.ls-compare-card strong { font-size:10px; }
+.ls-compare-pct { font-size:22px;font-weight:800;line-height:1.1;color:#244f3a; }
+.ls-compare-card small { font-size:9px;color:#6d776f; }
+.ls-heads-up { margin-top:10px;border-top:1px dashed #d5dbd4;padding-top:9px;font-size:10px;color:#3f4a42; }
+.ls-heads-up strong { display:block;margin-bottom:4px;font-size:10px; }
+.ls-heads-up ol { margin:0;padding-left:16px;line-height:1.45; }
 .ls-section-label { display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:8px; }
 .ls-section-label strong { font-size:10px; }
 .ls-section-label span { font-size:8px;color:#929c94; }

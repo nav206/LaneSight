@@ -13,7 +13,7 @@ import {
   getStreetConditions,
 } from "../lib/lanesight-service";
 import {
-  NoMappedBikewayRouteError,
+  BikeRoutingUnavailableError,
   PlaceNotFoundError,
   planBikeRoute,
 } from "../lib/lanesight-routing";
@@ -74,11 +74,12 @@ router.post("/lanesight/route", async (req, res): Promise<void> => {
     );
     res.json(result);
   } catch (error) {
-    if (
-      error instanceof PlaceNotFoundError ||
-      error instanceof NoMappedBikewayRouteError
-    ) {
+    if (error instanceof PlaceNotFoundError) {
       res.status(404).json(errorResponse(error.message));
+      return;
+    }
+    if (error instanceof BikeRoutingUnavailableError) {
+      res.status(502).json(errorResponse(error.message));
       return;
     }
 

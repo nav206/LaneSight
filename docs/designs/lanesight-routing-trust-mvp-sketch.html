@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LaneSight — mobile-first route trust wireframe</title>
+  <style>
+    /* Rough sketch — system fonts, gray borders. Mobile-primary. */
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, sans-serif;
+      color: #222;
+      background: #cfcfcf;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      justify-content: center;
+      padding: 16px;
+    }
+    .phone {
+      width: 390px;
+      height: 780px;
+      border: 2px solid #444;
+      background: #eee;
+      position: relative;
+      overflow: hidden;
+      box-shadow: 4px 4px 0 #999;
+    }
+    .desktop-note {
+      width: 280px;
+      font-size: 12px;
+      color: #444;
+      border: 1px dashed #666;
+      padding: 12px;
+      background: #f7f7f7;
+      align-self: flex-start;
+    }
+    .map {
+      position: absolute;
+      inset: 0;
+      /* Suggest real basemap tiles (CARTO/OSM) — grid stands in for sketch */
+      background:
+        radial-gradient(circle at 30% 40%, #d9e0d8 0, transparent 45%),
+        repeating-linear-gradient(0deg, transparent, transparent 27px, #c5c5c5 28px),
+        repeating-linear-gradient(90deg, transparent, transparent 27px, #c5c5c5 28px),
+        #d8d8d8;
+    }
+    .map-chrome {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      z-index: 5;
+    }
+    .map-chrome button {
+      width: 36px;
+      height: 36px;
+      border: 1px solid #555;
+      background: #fff;
+      font-size: 18px;
+      line-height: 1;
+    }
+    .gesture-hint {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      right: 60px;
+      font-size: 10px;
+      color: #555;
+      background: rgba(255,255,255,0.88);
+      border: 1px solid #999;
+      padding: 6px 8px;
+      z-index: 5;
+    }
+    .route-svg {
+      position: absolute;
+      inset: 18% 8% 38% 8%;
+      width: 84%;
+      height: 44%;
+      z-index: 2;
+    }
+    .od-label {
+      position: absolute;
+      font-size: 10px;
+      font-weight: 700;
+      background: #fff;
+      border: 1px solid #333;
+      padding: 2px 5px;
+      z-index: 4;
+    }
+    .od-a { left: 12%; bottom: 40%; }
+    .od-b { right: 10%; top: 22%; }
+    .callout {
+      position: absolute;
+      left: 28%;
+      top: 42%;
+      border: 1px solid #333;
+      background: #fff;
+      padding: 5px 7px;
+      font-size: 10px;
+      max-width: 140px;
+      z-index: 4;
+      box-shadow: 2px 2px 0 #aaa;
+    }
+    /* Bottom sheet — primary mobile chrome */
+    .sheet {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 46%;
+      background: #f4f4f4;
+      border-top: 2px solid #444;
+      padding: 8px 12px 12px;
+      z-index: 6;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      overflow: auto;
+    }
+    .grab {
+      width: 40px;
+      height: 4px;
+      background: #999;
+      border-radius: 2px;
+      margin: 0 auto 4px;
+    }
+    h1 {
+      font-size: 16px;
+      margin: 0;
+      line-height: 1.2;
+    }
+    .tag { font-size: 10px; color: #666; }
+    .row {
+      display: flex;
+      gap: 8px;
+      align-items: stretch;
+    }
+    .alt {
+      flex: 1;
+      border: 1px solid #888;
+      background: #fff;
+      padding: 8px;
+      font-size: 11px;
+      text-align: left;
+    }
+    .alt.selected {
+      border: 2px solid #222;
+      background: #fff;
+    }
+    .alt .name { font-weight: 700; font-size: 12px; }
+    .alt .pct { font-size: 18px; font-weight: 700; margin: 2px 0; }
+    .trust-line {
+      font-size: 11px;
+      border: 1px solid #888;
+      background: #fff;
+      padding: 8px;
+    }
+    .heads {
+      font-size: 11px;
+      border: 1px solid #888;
+      background: #fff;
+      padding: 8px;
+      line-height: 1.35;
+    }
+    .search {
+      display: grid;
+      grid-template-columns: 28px 1fr;
+      gap: 4px 8px;
+      font-size: 11px;
+      align-items: center;
+      border: 1px solid #888;
+      background: #fff;
+      padding: 8px;
+    }
+    .badge {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      border: 2px solid #222;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: 700;
+      background: #fff;
+    }
+    .badge.b { background: #222; color: #fff; }
+    .legend { font-size: 10px; color: #444; }
+    .legend i {
+      display: inline-block;
+      width: 14px;
+      height: 3px;
+      vertical-align: middle;
+      margin-right: 4px;
+      border: 1px solid #666;
+    }
+    .g { background: #2f6f4e; }
+    .a { background: #c4a35a; }
+  </style>
+</head>
+<body>
+  <!-- Decisions:
+       - Mobile-primary: map full-bleed + bottom sheet (not desktop sidebar).
+       - Real map implied: pinch zoom / two-finger rotate chrome hints.
+       - Distinct O (circle A) vs D (filled B) markers.
+       - MVP includes 2–3 comparable alternatives (designated % vs time).
+  -->
+  <div class="phone" aria-label="Mobile wireframe">
+    <div class="map">
+      <div class="gesture-hint">Map: pinch zoom · two-finger twist to orient · pan</div>
+      <div class="map-chrome">
+        <button type="button" aria-label="Zoom in">+</button>
+        <button type="button" aria-label="Zoom out">−</button>
+        <button type="button" aria-label="Reset north" title="Reset orientation">⌂</button>
+      </div>
+      <svg class="route-svg" viewBox="0 0 400 300" xmlns="http://www.w3.org/2000/svg">
+        <!-- Selected alt: green/amber -->
+        <path d="M40 240 C 80 200, 110 160, 150 140" fill="none" stroke="#2f6f4e" stroke-width="7" stroke-linecap="round" />
+        <path d="M150 140 C 180 125, 200 120, 230 115" fill="none" stroke="#c4a35a" stroke-width="7" stroke-linecap="round" stroke-dasharray="8 5" />
+        <path d="M230 115 C 280 100, 330 80, 360 50" fill="none" stroke="#2f6f4e" stroke-width="7" stroke-linecap="round" />
+        <!-- Faint alternate (compare) -->
+        <path d="M40 240 C 100 220, 160 180, 220 100 S 320 40, 360 50" fill="none" stroke="#777" stroke-width="3" stroke-dasharray="2 6" opacity="0.55" />
+        <circle cx="150" cy="140" r="6" fill="#fff" stroke="#222" stroke-width="2" />
+      </svg>
+      <div class="od-label od-a">A · Origin</div>
+      <div class="od-label od-b">B · Dest</div>
+      <div class="callout">Bike lane ends — mixed traffic</div>
+    </div>
+
+    <div class="sheet">
+      <div class="grab" aria-hidden="true"></div>
+      <div class="tag">WIREFRAME · mobile MVP</div>
+      <h1>Know the lane before you ride.</h1>
+
+      <div class="search">
+        <div class="badge">A</div>
+        <div>Civic Center, San Francisco</div>
+        <div class="badge b">B</div>
+        <div>Ferry Building, San Francisco</div>
+      </div>
+
+      <div class="tag">COMPARE ROUTES (MVP)</div>
+      <div class="row">
+        <button type="button" class="alt selected">
+          <div class="name">More lanes</div>
+          <div class="pct">74%</div>
+          designated · 22 min
+        </button>
+        <button type="button" class="alt">
+          <div class="name">Faster</div>
+          <div class="pct">58%</div>
+          designated · 18 min
+        </button>
+      </div>
+
+      <div class="trust-line">
+        <strong>Selected:</strong> 1.6 mi mixed traffic · 3 transitions<br />
+        <span class="tag">SFMTA inventory · updated Oct 12, 2026</span>
+      </div>
+
+      <div class="heads">
+        <strong>Heads-up</strong><br />
+        1. Bike lane ends near Fell &amp; Divisadero<br />
+        2. Designated resumes after Market approach
+      </div>
+
+      <div class="legend">
+        <i class="g"></i>Designated &nbsp; <i class="a"></i>Ordinary street &nbsp; ○ transition
+      </div>
+    </div>
+  </div>
+
+  <div class="desktop-note">
+    <strong>Feedback folded in</strong>
+    <ul style="padding-left:16px; margin:8px 0; line-height:1.4">
+      <li>Full map under the sheet (Leaflet-class: zoom, pan, two-finger rotate)</li>
+      <li>Distinct A / B origin &amp; destination markers</li>
+      <li>MVP: ≥2 alternatives + compare by designated % and time</li>
+      <li>Primary layout = phone bottom sheet; desktop can widen sheet to side pane later</li>
+    </ul>
+    <p style="margin:0; line-height:1.35">Later (not blocking MVP ship): elevation, condition, voice, community points.</p>
+  </div>
+</body>
+</html>

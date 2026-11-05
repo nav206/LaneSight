@@ -7,18 +7,31 @@
  */
 import type { Coordinate } from './coordinate';
 import type { RouteEndpoint } from './routeEndpoint';
+import type { RouteSegment } from './routeSegment';
+import type { RouteTransition } from './routeTransition';
 
 export interface BikeRouteResponse {
   origin: RouteEndpoint;
   destination: RouteEndpoint;
+  /** Display label such as More lanes or Faster */
+  label: string;
   distanceMeters: number;
   durationSeconds: number;
+  designatedPercent: number;
+  mixedTrafficMeters: number;
+  transitionCount: number;
   profile: string;
   source: string;
+  /** Distance on designated SFMTA facilities (Class I/II/IV) */
   laneDistanceMeters: number;
+  /** Distance not on designated facilities (ordinary/shared) */
   connectorDistanceMeters: number;
   networkUpdatedAt: string;
+  /** Concatenated designated segment geometry */
   laneCoordinates: Coordinate[];
+  /** Non-designated polylines for map styling */
   connectorCoordinates: Coordinate[][];
   coordinates: Coordinate[];
+  segments: RouteSegment[];
+  transitions: RouteTransition[];
 }
