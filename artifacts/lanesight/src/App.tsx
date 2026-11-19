@@ -314,7 +314,7 @@ function App() {
 
       <section className="ls-map-wrap" aria-label="San Francisco bicycle route map" data-testid="map-panel">
         <MapContainer center={SF_CENTER} zoom={11} scrollWheelZoom preferCanvas className="ls-leaflet" zoomControl={false} data-testid="street-map">
-          <TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>' url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png" />
+          <TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
           <FitCitywide />
           {layers.network && networkGeoJson.features.length > 0 && <GeoJSON
             key={`sf-network-${networkQuery.data?.sourceUpdatedAt ?? 'loading'}`}
@@ -360,7 +360,7 @@ function App() {
           {layerButton('reports', 'Open 311', MapPin)}
         </div>
         {routeFailed && <div className="ls-map-error" role="alert" data-testid="map-route-error"><strong>Could not plan this route</strong>{errorMessage(routeMutation.error)}<br />Try a different San Francisco origin or destination.</div>}
-        <div className="ls-map-attribution" data-testid="text-map-attribution">Map tiles © CARTO · Street data © OpenStreetMap contributors</div>
+        <div className="ls-map-attribution" data-testid="text-map-attribution">Map tiles © OpenStreetMap contributors</div>
       </section>
     </main>
   </div>;

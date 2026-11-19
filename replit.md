@@ -26,6 +26,12 @@ A responsive, single-page San Francisco bicycle route planner using a citywide s
 - `artifacts/api-server/` — public-data proxy, geocoding, and route API required by LaneSight.
 - `artifacts/mockup-sandbox/` — reusable design preview sandbox.
 
+## Hosting (non-Replit)
+
+- GitHub Pages serves the static UI only (`BASE_PATH=/LaneSight/`). Workflow: `.github/workflows/deploy-pages.yml`.
+- Express API cannot run on Pages. Ship `Dockerfile.api` / `render.yaml` to Render (or Fly/Railway), then set GitHub secret `VITE_API_BASE_URL` to that API origin.
+- Local: API on `:8080`, Vite on `:5173` with `/api` proxied.
+
 ## Architecture decisions
 
 - LaneSight uses the official SFMTA bike network as its route graph, respecting one-way direction. Class III shared-road features are displayed but not used as bike-lane route segments.
