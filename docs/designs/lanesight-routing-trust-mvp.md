@@ -110,7 +110,7 @@ Keep SFMTA Dijkstra when continuous, else BRouter — rejected for dual-path inc
 
 ## Distribution Plan
 
-Existing Replit / static web + `/api` deploy pipeline covers this. No new binary distribution.
+GitHub Pages hosts the static UI; Express API deploys separately via `Dockerfile.api` / `render.yaml` (Render/Fly/Railway). Wire them with `VITE_API_BASE_URL`. No binary distribution.
 
 ## Next Steps
 
